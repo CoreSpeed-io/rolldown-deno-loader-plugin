@@ -1,0 +1,14 @@
+{
+  "name": "@bureaudouble/rolldown-deno-loader-plugin",
+  "version": "0.1.0",
+  "exports": "./mod.ts",
+  "tasks": {
+    "dev": "deno test --watch mod.ts"
+  },
+  "license": "MIT",
+  "imports": {
+    "@bureaudouble-forks/importmap": "jsr:@bureaudouble-forks/importmap@^0.2.1",
+    "@std/path": "jsr:@std/path@^1.0.8",
+    "rolldown": "npm:rolldown@^1.0.0-beta.1"
+  }
+}
