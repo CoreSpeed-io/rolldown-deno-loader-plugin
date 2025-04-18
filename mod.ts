@@ -1,10 +1,17 @@
-import type { Plugin, PluginContext } from "npm:rolldown@^1.0.0-beta.3-commit.fc7dd8c";
+import type {
+  NormalizedOutputOptions,
+  Plugin,
+  PluginContext,
+  RenderedChunk,
+  RenderedChunkMeta,
+} from "npm:rolldown@^1.0.0-beta.7";
 import {
   type ImportMap,
   resolveImportMap,
   resolveModuleSpecifier,
 } from "jsr:@bureaudouble-forks/importmap@^0.2.1";
 import { toFileUrl } from "jsr:/@std/path@^1.0.8/to-file-url";
+import { isBuiltin } from "node:module";
 
 enum DenoMediaType {
   JavaScript = "JavaScript",
@@ -264,6 +271,11 @@ class DenoLoaderPlugin {
     }
 
     let maybe_resolved = id;
+
+    if (isBuiltin(maybe_resolved) && !maybe_resolved.startsWith("node:")) {
+      return { id: "node:" + maybe_resolved, external: true };
+    }
+
     if (!id.startsWith(".") && !id.startsWith("/")) {
       maybe_resolved = this.resolveFromImportMap(id, importer) ?? id;
     }
@@ -325,6 +337,20 @@ class DenoLoaderPlugin {
       return { code, moduleType };
     }
   }
+
+  renderChunk(
+    code: string,
+    _chunk: RenderedChunk,
+    _outputOptions: NormalizedOutputOptions,
+    _meta: RenderedChunkMeta,
+  ): string | null {
+    // Only handle 'module' import from Rolldown runtime
+    // Other builtins are already handled by resolveId
+    return code.replace(
+      /from\s+["']module["']/g,
+      'from "node:module"',
+    );
+  }
 }
 
 export const createDenoLoaderPlugin = (options: {
@@ -350,6 +376,9 @@ export const createDenoLoaderPlugin = (options: {
     },
     load(...props) {
       return loader.load(this, ...props);
+    },
+    renderChunk(...props) {
+      return loader.renderChunk(...props);
     },
   };
 };
