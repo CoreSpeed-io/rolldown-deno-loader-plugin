@@ -1,10 +1,10 @@
-import type { Plugin, PluginContext } from "rolldown";
+import type { Plugin, PluginContext } from "npm:rolldown@^1.0.0-beta.3-commit.fc7dd8c";
 import {
   type ImportMap,
   resolveImportMap,
   resolveModuleSpecifier,
-} from "@bureaudouble-forks/importmap";
-import { toFileUrl } from "@std/path/to-file-url";
+} from "jsr:@bureaudouble-forks/importmap@^0.2.1";
+import { toFileUrl } from "jsr:/@std/path@^1.0.8/to-file-url";
 
 enum DenoMediaType {
   JavaScript = "JavaScript",
@@ -88,15 +88,15 @@ type ExtractFunction<T> = T extends (...args: any[]) => any ? T
 
 class DenoLoaderPlugin {
   private resolveDenoInfoCache: Map<string, DenoResolveResult>;
-  private resolveModuleSpecifierCache: Map<string, string>;
+  private resolveModuleSpecifierCache: Map<string, string | null>;
   public importMap: ImportMap;
   public importMapBaseUrl: URL;
   public entryPoints: string[];
-  public clientInfo?: DenoInfoJsonV1;
+  public denoInfoCache?: DenoInfoJsonV1;
 
   constructor(
-    importMap: string,
-    importMapBaseUrl: string,
+    importMap: ImportMap,
+    importMapBaseUrl: string | URL,
     entryPoints?: string[],
     denoInfoCache?: DenoInfoJsonV1,
   ) {
@@ -104,11 +104,8 @@ class DenoLoaderPlugin {
     this.resolveDenoInfoCache = new Map<string, DenoResolveResult>();
     this.importMapBaseUrl = new URL(importMapBaseUrl);
     this.entryPoints = entryPoints ?? [];
-    this.importMap = resolveImportMap(
-      JSON.parse(importMap),
-      this.importMapBaseUrl,
-    );
-    if (denoInfoCache) this.cacheDenoInfo(denoInfoCache);
+    this.importMap = resolveImportMap(importMap, this.importMapBaseUrl);
+    this.denoInfoCache = denoInfoCache;
   }
 
   private async denoInfo(specifier: string): Promise<DenoInfoJsonV1> {
@@ -203,16 +200,19 @@ class DenoLoaderPlugin {
     }
   }
 
-  private resolveFromImportMap(id: string, importer?: string) {
+  private resolveFromImportMap(id: string, importer?: string): null | string {
     const key = JSON.stringify({ id, importer });
     const cacheValue = this.resolveModuleSpecifierCache.get(key);
-    if (cacheValue) return cacheValue;
+    if (cacheValue !== undefined) return cacheValue;
     const importer_url = new URL(
       importer
         ? URL.canParse(importer) ? importer : toFileUrl(importer)
         : this.importMapBaseUrl,
     );
-    const value = resolveModuleSpecifier(id, this.importMap, importer_url);
+    let value = null;
+    try {
+      value = resolveModuleSpecifier(id, this.importMap, importer_url);
+    } catch {}
     this.resolveModuleSpecifierCache.set(key, value);
     return value;
   }
@@ -241,6 +241,7 @@ class DenoLoaderPlugin {
     _context: PluginContext,
     ..._args: Parameters<ExtractFunction<Plugin["buildStart"]>>
   ): Promise<Awaited<ReturnType<ExtractFunction<Plugin["buildStart"]>>>> {
+    if (this.denoInfoCache) this.cacheDenoInfo(this.denoInfoCache);
     for (const entry of this.entryPoints) {
       await this.denoResolve(entry);
     }
@@ -252,10 +253,9 @@ class DenoLoaderPlugin {
       ExtractFunction<Plugin["resolveId"]>
     >
   ): Promise<Awaited<ReturnType<ExtractFunction<Plugin["resolveId"]>>>> {
-    if (importer?.includes("node_modules")) return;
     let id = specifier;
     if (specifier.startsWith(".") || specifier.startsWith("/")) {
-      if (importer) {
+      if (importer && !importer.includes("node_modules")) {
         const base_url = new URL(
           URL.canParse(importer) ? importer : toFileUrl(importer),
         );
@@ -264,12 +264,8 @@ class DenoLoaderPlugin {
     }
 
     let maybe_resolved = id;
-    if (
-      !id.startsWith(".") &&
-      !id.startsWith("/") &&
-      !importer?.includes("node_modules")
-    ) {
-      maybe_resolved = this.resolveFromImportMap(id, importer);
+    if (!id.startsWith(".") && !id.startsWith("/")) {
+      maybe_resolved = this.resolveFromImportMap(id, importer) ?? id;
     }
     if (maybe_resolved.startsWith("node:")) {
       return { id: maybe_resolved, external: true };
@@ -332,7 +328,7 @@ class DenoLoaderPlugin {
 }
 
 export const createDenoLoaderPlugin = (options: {
-  importMap: string;
+  importMap: ImportMap;
   importMapBaseUrl: string;
   entryPoints?: string[];
   denoInfoCache?: DenoInfoJsonV1;
